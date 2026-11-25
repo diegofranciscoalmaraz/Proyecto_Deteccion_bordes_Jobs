@@ -108,6 +108,35 @@ Los resultados generados por los workers se guardan en el directorio de salida c
 
 El programa de merge (`app/merge.py`) permite integrar los resultados parciales y generar un resumen global.
 
+## 7. Ejecutar en Kubernetes (kind + Job indexado)
+
+Requisitos: Docker, [kind](https://kind.sigs.k8s.io/) >= 0.23, kubectl >= 1.33 y `envsubst`.
+
+```bash
+# 1. Dataset (si aún no lo tienes)
+bash scripts/descargar-datos.sh imagenette
+
+# 2. Clúster kind (1 control-plane + 3 workers, datos/ montada en /data de cada nodo),
+#    construye bordes:1.0 y la carga en los nodos
+bash scripts/crear-cluster.sh
+
+# 3. Muestra de 400 fotos para la primera prueba
+bash scripts/crear-muestra.sh 400
+
+# 4. Job indexado: 8 tareas, 4 pods en paralelo
+bash scripts/lanzar-job.sh 8 4 /data/entrada/muestra400/val
+```
+
+`lanzar-job.sh` renderiza `k8s/job.yaml.tpl`, aplica el Job, espera a que termine, guarda
+en `docs/evidencias/<corrida>/` el reparto de pods por nodo (`kubectl get pods -o wide`),
+`kubectl describe job` y los tiempos del Job, y ejecuta `app/merge.py` sobre
+`datos/salida/<corrida>/` (genera `resultados.csv`, `summary.json` y `mosaico.png`).
+
+Opciones por variables de entorno: `STRATEGY` (por ahora `block`), `SAVE_EDGES=0|1`,
+`CPU_REQUEST`, `CPU_LIMIT`, `MEM_REQUEST`, `MEM_LIMIT`, `IMAGE`.
+
+Para borrar el clúster: `kind delete cluster --name bordes`.
+
 ## Notas
 
 - El dataset y los resultados se mantienen localmente y no se suben al repositorio.

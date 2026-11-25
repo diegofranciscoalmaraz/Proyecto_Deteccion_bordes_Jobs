@@ -244,3 +244,6 @@ output/*
 
 # Resultados del procesamiento
 datos/salida/
+
+# Generado por scripts/crear-cluster.sh
+k8s/kind-config.yaml
