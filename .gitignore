@@ -221,3 +221,29 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+# Entornos virtuales
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.pyc
+
+# Dataset original
+data/
+
+# Archivos temporales
+.DS_Store
+datos/
+
+# Resultados generados
+output/*
+!output/.gitkeep
+
+# Resultados del procesamiento
+datos/salida/
+
+# Generado por scripts/crear-cluster.sh
+k8s/kind-config.yaml
