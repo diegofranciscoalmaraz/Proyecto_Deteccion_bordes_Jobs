@@ -236,3 +236,11 @@ data/
 
 # Archivos temporales
 .DS_Store
+datos/
+
+# Resultados generados
+output/*
+!output/.gitkeep
+
+# Resultados del procesamiento
+datos/salida/
