@@ -4,8 +4,7 @@ import csv
 import json
 from pathlib import Path
 
-import cv2
-import numpy as np
+from statistics import mean
 
 
 def read_csv_files(input_dir):
@@ -56,15 +55,15 @@ def save_results(rows, output_dir):
 def calculate_imbalance(summaries):
     times = [item["total_seconds"] for item in summaries]
 
-    average = float(np.mean(times))
-    maximum = float(np.max(times))
+    average = float(mean(times))
+    maximum = float(max(times))
 
     imbalance = maximum / average if average > 0 else 0
 
     return {
         "average_worker_seconds": round(average, 6),
         "max_worker_seconds": round(maximum, 6),
-        "min_worker_seconds": round(float(np.min(times)), 6),
+        "min_worker_seconds": round(float(min(times)), 6),
         "imbalance": round(imbalance, 6)
     }
 
@@ -77,6 +76,9 @@ def create_mosaic(input_dir, output_dir, count=16, columns=4):
     if not images:
         print("No hay imagenes de bordes para crear el mosaico.")
         return None
+
+    import cv2
+    import numpy as np
 
     thumb_width = 240
     thumb_height = 180
@@ -145,6 +147,24 @@ def main():
     rows = read_csv_files(input_dir)
     summaries = read_json_files(input_dir)
 
+    tasks = summaries[0]["tasks"]
+    expected = {f"part-{i:04d}" for i in range(tasks)}
+    for extension in ("csv", "json"):
+        if {p.stem for p in input_dir.glob(f"part-*.{extension}")} != expected:
+            raise ValueError("Conjunto de índices incompleto o inesperado")
+    for stem, part in zip(sorted(expected), summaries):
+        if (part["tasks"] != tasks or part["strategy"] != summaries[0]["strategy"]
+                or stem != f"part-{part['index']:04d}"):
+            raise ValueError("Metadatos de partes incompatibles")
+        with (input_dir / (stem + ".csv")).open() as stream:
+            statuses = [row["status"] for row in csv.DictReader(stream)]
+        if (len(statuses) != part["images_assigned"]
+                or statuses.count("ok") != part["images_processed"]
+                or statuses.count("error") != part["errors"]
+                or set(statuses) - {"ok", "error"}):
+            raise ValueError(f"Conteos inconsistentes en {stem}")
+    if len({row["filename"] for row in rows}) != len(rows):
+        raise ValueError("Hay imágenes duplicadas")
     results_file = save_results(rows, output_dir)
 
     successful = sum(row["status"] == "ok" for row in rows)

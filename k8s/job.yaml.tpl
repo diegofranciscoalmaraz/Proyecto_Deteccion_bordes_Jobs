@@ -18,6 +18,9 @@ spec:
       labels:
         app: bordes
     spec:
+      securityContext:
+        runAsUser: ${HOST_UID}
+        runAsGroup: ${HOST_GID}
       restartPolicy: Never          # obligatorio con backoffLimitPerIndex
       # Reparte los pods entre los 3 workers de kind.
       topologySpreadConstraints:
@@ -34,6 +37,8 @@ spec:
           command: ["sh", "-c"]
           args: ["python app/worker.py --strategy ${STRATEGY} ${SAVE_EDGES_FLAG}"]
           env:
+            - name: FAIL_INDEX
+              value: "${FAIL_INDEX}"
             - name: TOTAL_TASKS
               value: "${COMPLETIONS}"
             - name: INPUT_DIR

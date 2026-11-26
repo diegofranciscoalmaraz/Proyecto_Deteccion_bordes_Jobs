@@ -7,8 +7,7 @@ import socket
 import time
 from pathlib import Path
 
-import cv2
-import numpy as np
+import heapq
 
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
@@ -46,7 +45,7 @@ def get_arguments():
 
     parser.add_argument(
         "--strategy",
-        choices=["block"],
+        choices=["block", "cyclic", "lpt"],
         default="block"
     )
 
@@ -71,7 +70,20 @@ def list_images(input_dir):
     return images, elapsed
 
 
-def select_images(images, index, tasks):
+def select_images(images, index, tasks, strategy="block"):
+    if strategy == "cyclic":
+        return images[index::tasks]
+    if strategy == "lpt":
+        # Coste estimado por tamaño comprimido. Los empates respetan ruta e índice.
+        weighted = sorted((-path.stat().st_size, path) for path in images)
+        loads = [(0, task) for task in range(tasks)]
+        assigned = []
+        for negative_size, path in weighted:
+            load, task = heapq.heappop(loads)
+            if task == index:
+                assigned.append(path)
+            heapq.heappush(loads, (load - negative_size, task))
+        return assigned
     total = len(images)
 
     # Reparto por bloques contiguos.
@@ -85,6 +97,9 @@ def select_images(images, index, tasks):
 
 
 def process_image(image_path):
+    import cv2
+    import numpy as np
+
     image = cv2.imread(str(image_path))
 
     if image is None:
@@ -131,6 +146,12 @@ def main():
     if args.tasks < 1 or not 0 <= args.index < args.tasks:
         raise ValueError("Indice o numero de tareas invalido")
 
+    import cv2
+
+    if os.getenv("FAIL_INDEX") == str(args.index):
+        print(f"Fallo de prueba en índice {args.index}", flush=True)
+        raise SystemExit(42)
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -142,7 +163,7 @@ def main():
 
     # Seleccionar las imagenes de este worker
     assigned_images = select_images(
-        images, args.index, args.tasks
+        images, args.index, args.tasks, args.strategy
     )
 
     print(
@@ -174,6 +195,17 @@ def main():
                 time.perf_counter() - image_start
             ) * 1000
 
+            if args.save_edges:
+                destination = edges_dir / (str(image_path.relative_to(args.input_dir)) + ".png")
+                destination.parent.mkdir(parents=True, exist_ok=True)
+
+                saved = cv2.imwrite(str(destination), result["edges"])
+
+                if not saved:
+                    raise RuntimeError(
+                        f"No se pudo guardar la imagen: {destination}"
+                    )
+
             rows.append({
                 "filename": str(image_path.relative_to(args.input_dir)),
                 "width": result["width"],
@@ -185,15 +217,6 @@ def main():
                 "error": ""
             })
 
-            if args.save_edges:
-                destination = edges_dir / f"{image_path.stem}.png"
-
-                saved = cv2.imwrite(str(destination), result["edges"])
-
-                if not saved:
-                    raise RuntimeError(
-                        f"No se pudo guardar la imagen: {destination}"
-                    )
         except Exception as error:
             total_errors += 1
 
