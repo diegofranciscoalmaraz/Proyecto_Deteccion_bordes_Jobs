@@ -1,144 +1,40 @@
-# Proyecto de detección de bordes con Kubernetes Jobs
+# Detección de bordes en Imagenette · Fase 3 · Experimentos
 
-## Descripción
+Esta entrega del equipo 1 continúa el worker Sobel, el almacenamiento compartido y el Job indexado de la fase 2. La carpeta contiene la aplicación, el Dockerfile y los manifiestos necesarios para trabajar de forma independiente.
 
-Proyecto de procesamiento distribuido de imágenes del dataset Imagenette mediante workers en contenedores Docker, con ejecución paralela utilizando Kubernetes Jobs.
+## Preparar datos y clúster
 
-El procesamiento de cada imagen incluye:
-1. Conversión a escala de grises.
-2. Aplicación de filtro Gaussiano.
-3. Detección de bordes mediante Sobel.
-4. Aplicación de umbralización.
-
-## Requisitos
-
-- Git.
-- Docker instalado y en ejecución.
-- Python 3.13 (para ejecutar el proyecto fuera de Docker).
-
-## 1. Descargar el proyecto
+Desde esta carpeta en Linux, con Docker operativo, kind compatible con la imagen de Kubernetes 1.33.1 (por ejemplo kind 0.29), kubectl, envsubst, curl y Python 3.13, ejecutar los siguientes comandos. kind crea un nodo de control y tres workers locales. Si el equipo ya tiene Imagenette, puede copiar su directorio completo a `datos/entrada/imagenette2` y omitir la descarga.
 
 ```bash
-git clone https://github.com/diegofranciscoalmaraz/Proyecto_Deteccion_bordes_Jobs.git
-cd Proyecto_Deteccion_bordes_Jobs
-git checkout feature/worker
-```
-
-## 2. Descargar el dataset
-
-Ejecutar:
-
-```bash
-bash scripts/descargar-datos.sh
-```
-
-Las imágenes de validación deben quedar en:
-
-```text
-datos/entrada/imagenette2/val
-```
-
-## 3. Construir la imagen Docker
-
-Desde la raíz del repositorio:
-
-```bash
-docker build -t bordes:1.0 .
-```
-
-Verificar que la imagen se creó:
-
-```bash
-docker images
-```
-
-La imagen se construye localmente a partir del Dockerfile incluido en el repositorio. No se necesita Docker Hub.
-
-## 4. Probar un worker con Docker
-
-Crear el directorio de salida:
-
-```bash
-mkdir -p datos/salida-docker
-```
-
-Ejecutar:
-
-```bash
-docker run --rm \
-  -v "$(pwd)/datos/entrada:/data/entrada:ro" \
-  -v "$(pwd)/datos/salida-docker:/data/salida" \
-  -e TOTAL_TASKS=4 \
-  bordes:1.0 \
-  python app/worker.py --index 0 --tasks 4
-```
-
-El worker procesa las imágenes que le corresponden y genera un CSV:
-
-```text
-datos/salida-docker/part-0000.csv
-```
-
-En la salida de la terminal se muestran las imágenes asignadas, procesadas, errores y tiempo de ejecución.
-
-## 5. Ejecutar el worker localmente (opcional)
-
-Crear y activar un entorno virtual:
-
-```bash
-python3 -m venv .venv
+python3.13 -m venv .venv
 source .venv/bin/activate
-```
-
-Instalar dependencias:
-
-```bash
 pip install -r requirements.txt
-```
-
-Ejecutar un worker:
-
-```bash
-python app/worker.py --index 0 --tasks 4
-```
-
-## 6. Resultados
-
-Los resultados generados por los workers se guardan en el directorio de salida configurado.
-
-El programa de merge (`app/merge.py`) permite integrar los resultados parciales y generar un resumen global.
-
-## 7. Ejecutar en Kubernetes (kind + Job indexado)
-
-Requisitos: Docker, [kind](https://kind.sigs.k8s.io/) >= 0.23, kubectl >= 1.33 y `envsubst`.
-
-```bash
-# 1. Dataset (si aún no lo tienes)
 bash scripts/descargar-datos.sh imagenette
-
-# 2. Clúster kind (1 control-plane + 3 workers, datos/ montada en /data de cada nodo),
-#    construye bordes:1.0 y la carga en los nodos
 bash scripts/crear-cluster.sh
-
-# 3. Muestra de 400 fotos para la primera prueba
 bash scripts/crear-muestra.sh 400
-
-# 4. Job indexado: 8 tareas, 4 pods en paralelo
 bash scripts/lanzar-job.sh 8 4 /data/entrada/muestra400/val
 ```
 
-`lanzar-job.sh` renderiza `k8s/job.yaml.tpl`, aplica el Job, espera a que termine, guarda
-en `docs/evidencias/<corrida>/` el reparto de pods por nodo (`kubectl get pods -o wide`),
-`kubectl describe job` y los tiempos del Job, y ejecuta `app/merge.py` sobre
-`datos/salida/<corrida>/` (genera `resultados.csv`, `summary.json` y `mosaico.png`).
+El contexto es `kind-bordes-f34`, la imagen local es `bordes:f34` y los workers montan el directorio `datos` de esta copia. La prueba de continuidad genera ocho partes, el consolidado y el mosaico. Los resultados quedan en `datos/salida/<job>` y la evidencia del clúster en `docs/evidencias/<job>`.
 
-Opciones por variables de entorno: `STRATEGY` (por ahora `block`), `SAVE_EDGES=0|1`,
-`CPU_REQUEST`, `CPU_LIMIT`, `MEM_REQUEST`, `MEM_LIMIT`, `IMAGE`.
+## Fase 3 · Experimentos
 
-Para borrar el clúster: `kind delete cluster --name bordes`.
+```bash
+python experimentos.py --probar-fallo
+python experimentos.py
+```
 
-## Notas
+La prueba separada fuerza el fallo del índice 0 y comprueba tres pods fallidos (intento inicial y dos reintentos), la finalización del índice 1 y la condición terminal Failed del Job. La matriz procesa las 3,925 fotos completas con 16 índices por Job. Alterna estrategias dentro de cada nivel de paralelismo (1, 2, 4, 8) y repite el ciclo tres veces. Las tres estrategias usan la misma entrada ordenada. Block distribuye bloques contiguos, cyclic reparte por turnos y LPT asigna cada imagen en orden decreciente de bytes al índice con menor carga acumulada. En los empates decide la ruta y después el índice.
 
-- El dataset y los resultados se mantienen localmente y no se suben al repositorio.
-- La imagen Docker debe construirse en cada equipo usando el Dockerfile.
-- Para ejecutar los workers en Kubernetes, el entorno debe proporcionar el dataset en la ruta configurada y las variables de entorno correspondientes.
+Cada corrida guarda el manifiesto, el Job JSON y los pods. El CSV registra una fila después de verificar los 16 índices, 3,925 imágenes procesadas y cero errores. Los segundos provienen de la diferencia entre completionTime y startTime. Las corridas omiten el guardado de PNG. Mantener fijos la imagen, los datos, los recursos y la máquina durante la serie. Si el proceso se interrumpe, comprobar que el Job anterior haya terminado antes de relanzar el comando. El programa valida contra las evidencias las filas ya guardadas y continúa con las combinaciones faltantes. Conservar juntos `tiempos.csv`, `docs/evidencias` y `datos/salida`.
+
+La fase 4 consume el archivo completo de 36 mediciones.
+
+## Validación local
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+Las pruebas usan directorios temporales. Comprueban las particiones, la integridad del merge y la reanudación de la matriz de experimentos. El estado de la auditoría figura en `docs/auditoria.md`.

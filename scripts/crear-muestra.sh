@@ -11,8 +11,20 @@ DST="$BASE_DIR/datos/entrada/muestra$N/val"
 
 [[ -d "$SRC" ]] || { echo "Falta $SRC. Ejecuta scripts/descargar-datos.sh imagenette"; exit 1; }
 
-rm -rf "$DST"; mkdir -p "$DST"
-( cd "$SRC" && find . -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' \) | sort | head -n "$N" \
-    | xargs cp --parents -t "$DST" )
+python3 - "$SRC" "$DST" "$N" <<'PYTHON'
+import sys, shutil
+from pathlib import Path
 
-echo "Muestra creada: $(find "$DST" -type f | wc -l) fotos en $DST"
+src, dst = map(Path, sys.argv[1:3])
+count = int(sys.argv[3])
+images = sorted(p for p in src.rglob("*") if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png"})
+if not 1 <= count <= len(images):
+    sys.exit("Cantidad solicitada fuera del rango disponible")
+if dst.exists():
+    shutil.rmtree(dst)
+for image in images[:count]:
+    target = dst / image.relative_to(src)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(image, target)
+print(f"Muestra creada con {count} imágenes en {dst}")
+PYTHON
